@@ -4,7 +4,7 @@ import Layout from '@/components/Layout'
 
 type Funcionario = { id: string; nome: string; data_admissao: string; cargo: string | null; ativo: boolean }
 type Periodo = { id: string; funcionario_id: string; ano: number; dias_direito: number; observacao: string | null }
-type Uso = { id: string; funcionario_id: string; data_inicio: string; data_fim: string; dias_uteis: number; observacao: string | null }
+type Uso = { id: string; funcionario_id: string; data_inicio: string; data_fim: string; dias_uteis: number; observacao: string | null; created_at: string }
 
 type Props = {
   email: string
@@ -34,12 +34,23 @@ function calcSaldo(fid: string, periodos: Periodo[], usos: Uso[]) {
 
 function fmtDate(d: string) {
   if (!d) return ''
-  const [y, m, day] = d.split('-')
+  const [y, m, day] = d.split('T')[0].split('-')
   return `${day}/${m}/${y}`
 }
 
+function getAno(d: string) {
+  return d.split('T')[0].split('-')[0]
+}
+
+const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+
+function fmtMesAno(d: string) {
+  const [,m,] = d.split('T')[0].split('-')
+  return MESES[parseInt(m) - 1]
+}
+
 export default function FeriasClient({ email, funcionarios: fInit, periodos: pInit, usos: uInit }: Props) {
-  const [tab, setTab] = useState<'saldos' | 'registrar' | 'funcionarios'>('saldos')
+  const [tab, setTab] = useState<'saldos' | 'historico' | 'registrar' | 'funcionarios'>('saldos')
   const [funcionarios, setFuncionarios] = useState(fInit)
   const [periodos, setPeriodos] = useState(pInit)
   const [usos, setUsos] = useState(uInit)
@@ -148,6 +159,11 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
 
   const funcAtivos = funcionarios.filter(f => f.ativo)
 
+  // Cores por funcionário
+  const CORES = ['bg-blue-500','bg-purple-500','bg-green-500','bg-orange-500','bg-pink-500','bg-teal-500','bg-indigo-500','bg-red-500']
+  const coresPorFuncionario: Record<string, string> = {}
+  funcAtivos.forEach((f, i) => { coresPorFuncionario[f.id] = CORES[i % CORES.length] })
+
   return (
     <Layout email={email}>
       <div className="max-w-5xl mx-auto px-6 py-8">
@@ -160,6 +176,7 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
         <div className="flex gap-1 mb-6 border-b border-gray-200">
           {([
             { key: 'saldos', label: 'Saldos' },
+            { key: 'historico', label: 'Histórico' },
             { key: 'registrar', label: 'Registrar férias' },
             { key: 'funcionarios', label: 'Funcionários' },
           ] as const).map(t => (
@@ -184,92 +201,174 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
             {funcAtivos.map(f => {
               const { totalDireito, totalUsado, saldo } = calcSaldo(f.id, periodos, usos)
               const persFuncionario = periodos.filter(p => p.funcionario_id === f.id).sort((a, b) => a.ano - b.ano)
-              const usosFuncionario = usos.filter(u => u.funcionario_id === f.id)
+              const pct = totalDireito > 0 ? Math.min(100, Math.round((totalUsado / totalDireito) * 100)) : 0
 
               return (
                 <div key={f.id} className="card p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <p className="font-semibold text-gray-900">{f.nome}</p>
-                      <p className="text-xs text-gray-400">{f.cargo || 'Sem cargo'} · Admissão: {fmtDate(f.data_admissao)}</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-full ${coresPorFuncionario[f.id]} flex items-center justify-center text-white text-sm font-semibold`}>
+                        {f.nome.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-900">{f.nome}</p>
+                        <p className="text-xs text-gray-400">{f.cargo || 'Sem cargo'} · desde {fmtDate(f.data_admissao)}</p>
+                      </div>
                     </div>
-                    <div className="flex gap-6 text-sm">
-                      <div className="text-center">
-                        <p className="text-xs text-gray-400 mb-0.5">Direito acumulado</p>
-                        <p className="font-semibold text-gray-700">{totalDireito} dias</p>
+                    <div className="flex gap-6 text-center">
+                      <div>
+                        <p className="text-xs text-gray-400">Direito total</p>
+                        <p className="font-semibold text-gray-700 text-lg">{totalDireito}d</p>
                       </div>
-                      <div className="text-center">
-                        <p className="text-xs text-gray-400 mb-0.5">Usados</p>
-                        <p className="font-semibold text-orange-600">{totalUsado} dias</p>
+                      <div>
+                        <p className="text-xs text-gray-400">Usados</p>
+                        <p className="font-semibold text-orange-500 text-lg">{totalUsado}d</p>
                       </div>
-                      <div className="text-center">
-                        <p className="text-xs text-gray-400 mb-0.5">Saldo</p>
-                        <p className={`font-bold text-lg leading-tight ${saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>{saldo}d</p>
+                      <div>
+                        <p className="text-xs text-gray-400">Saldo</p>
+                        <p className={`font-bold text-lg ${saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>{saldo}d</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Barra de progresso */}
+                  {/* Barra */}
                   {totalDireito > 0 && (
-                    <div className="mb-4">
-                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="mb-3">
+                      <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>{pct}% utilizado</span>
+                        <span>{totalDireito - totalUsado} dias restantes</span>
+                      </div>
+                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-orange-400 rounded-full transition-all"
-                          style={{ width: `${Math.min(100, (totalUsado / totalDireito) * 100)}%` }}
+                          className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-red-400' : pct >= 75 ? 'bg-orange-400' : 'bg-green-400'}`}
+                          style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <p className="text-xs text-gray-400 mt-1">{Math.round((totalUsado / totalDireito) * 100)}% dos dias acumulados utilizados</p>
                     </div>
                   )}
 
-                  {/* Períodos de direito */}
+                  {/* Anos de direito */}
                   {persFuncionario.length > 0 && (
-                    <div className="mb-3">
-                      <p className="text-xs font-medium text-gray-500 mb-1.5">Dias de direito por ano</p>
-                      <div className="flex flex-wrap gap-2">
-                        {persFuncionario.map(p => (
-                          <div key={p.id} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs px-2.5 py-1 rounded-full">
-                            <span>{p.ano}: {p.dias_direito}d</span>
-                            <button onClick={() => deletarPeriodo(p.id)} className="text-blue-300 hover:text-blue-600">✕</button>
-                          </div>
-                        ))}
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {persFuncionario.map(p => (
+                        <span key={p.id} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                          {p.ano}: {p.dias_direito}d
+                          <button onClick={() => deletarPeriodo(p.id)} className="ml-1 text-blue-300 hover:text-blue-600">✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── TAB: Histórico ──────────────────────────────────────────────── */}
+        {tab === 'historico' && (
+          <div className="space-y-6">
+            {funcAtivos.length === 0 && (
+              <div className="card p-8 text-center text-gray-400 text-sm">Nenhum funcionário cadastrado.</div>
+            )}
+            {funcAtivos.map(f => {
+              const usosFuncionario = usos.filter(u => u.funcionario_id === f.id)
+                .sort((a, b) => b.data_inicio.localeCompare(a.data_inicio))
+
+              // Agrupar por ano
+              const porAno: Record<string, Uso[]> = {}
+              usosFuncionario.forEach(u => {
+                const ano = getAno(u.data_inicio)
+                if (!porAno[ano]) porAno[ano] = []
+                porAno[ano].push(u)
+              })
+
+              const anos = Object.keys(porAno).sort((a, b) => b.localeCompare(a))
+              const cor = coresPorFuncionario[f.id]
+
+              return (
+                <div key={f.id} className="card overflow-hidden">
+                  {/* Header */}
+                  <div className={`px-5 py-4 flex items-center justify-between ${cor} bg-opacity-10`} style={{background: 'linear-gradient(to right, #f8f9fa, #f1f3f5)'}}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full ${cor} flex items-center justify-center text-white text-sm font-semibold`}>
+                        {f.nome.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-900">{f.nome}</p>
+                        <p className="text-xs text-gray-500">{f.cargo || 'Sem cargo'}</p>
                       </div>
                     </div>
-                  )}
-
-                  {/* Histórico de usos */}
-                  {usosFuncionario.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 mb-1.5">Férias registradas</p>
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="text-gray-400">
-                            <th className="text-left pb-1 font-normal">Início</th>
-                            <th className="text-left pb-1 font-normal">Fim</th>
-                            <th className="text-left pb-1 font-normal">Dias úteis</th>
-                            <th className="text-left pb-1 font-normal">Obs.</th>
-                            <th className="pb-1" />
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {usosFuncionario.map(u => (
-                            <tr key={u.id}>
-                              <td className="py-1.5 text-gray-700">{fmtDate(u.data_inicio)}</td>
-                              <td className="py-1.5 text-gray-700">{fmtDate(u.data_fim)}</td>
-                              <td className="py-1.5 font-medium text-orange-600">{u.dias_uteis}d úteis</td>
-                              <td className="py-1.5 text-gray-400">{u.observacao || '—'}</td>
-                              <td className="py-1.5 text-right">
-                                <button onClick={() => deletarUso(u.id)} className="text-red-300 hover:text-red-500">✕</button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Total de registros</p>
+                      <p className="font-bold text-gray-800">{usosFuncionario.length} período{usosFuncionario.length !== 1 ? 's' : ''}</p>
                     </div>
-                  )}
+                  </div>
 
-                  {persFuncionario.length === 0 && usosFuncionario.length === 0 && (
-                    <p className="text-xs text-gray-400">Sem registros ainda.</p>
+                  {usosFuncionario.length === 0 ? (
+                    <div className="px-5 py-6 text-sm text-gray-400 text-center">Nenhum registro de férias ainda.</div>
+                  ) : (
+                    <div className="divide-y divide-gray-50">
+                      {anos.map(ano => {
+                        const usosAno = porAno[ano]
+                        const totalAno = usosAno.reduce((s, u) => s + u.dias_uteis, 0)
+                        const periodoAno = periodos.find(p => p.funcionario_id === f.id && p.ano === parseInt(ano))
+
+                        return (
+                          <div key={ano} className="px-5 py-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-gray-700">{ano}</span>
+                                {periodoAno && (
+                                  <span className="text-xs text-gray-400">({periodoAno.dias_direito}d de direito)</span>
+                                )}
+                              </div>
+                              <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                                {totalAno}d úteis usados
+                              </span>
+                            </div>
+
+                            {/* Timeline */}
+                            <div className="space-y-2">
+                              {usosAno.map((u, i) => (
+                                <div key={u.id} className="flex items-start gap-3 group">
+                                  {/* Linha do tempo */}
+                                  <div className="flex flex-col items-center mt-1">
+                                    <div className={`w-2.5 h-2.5 rounded-full ${cor} flex-shrink-0`} />
+                                    {i < usosAno.length - 1 && <div className="w-0.5 h-full bg-gray-200 mt-1 min-h-[20px]" />}
+                                  </div>
+
+                                  {/* Conteúdo */}
+                                  <div className="flex-1 flex items-center justify-between pb-2">
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm text-gray-800 font-medium">
+                                          {fmtDate(u.data_inicio)} → {fmtDate(u.data_fim)}
+                                        </span>
+                                        <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                                          {fmtMesAno(u.data_inicio)}
+                                        </span>
+                                      </div>
+                                      {u.observacao && (
+                                        <p className="text-xs text-gray-400 mt-0.5">{u.observacao}</p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-sm font-semibold text-orange-600">{u.dias_uteis}d úteis</span>
+                                      <button
+                                        onClick={() => deletarUso(u.id)}
+                                        className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-opacity text-xs"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               )
@@ -280,10 +379,9 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
         {/* ── TAB: Registrar ──────────────────────────────────────────────── */}
         {tab === 'registrar' && (
           <div className="space-y-6">
-            {/* Adicionar período de direito */}
             <div className="card p-6">
               <p className="text-sm font-medium text-gray-700 mb-1">Adicionar dias de direito por ano</p>
-              <p className="text-xs text-gray-400 mb-4">Defina quantos dias cada funcionário tem direito em cada ano. Os dias se acumulam.</p>
+              <p className="text-xs text-gray-400 mb-4">Os dias acumulam automaticamente entre anos.</p>
               {erroPer && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroPer}</div>}
               {sucessoPer && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoPer}</div>}
               <form onSubmit={salvarPeriodo} className="grid grid-cols-2 gap-4">
@@ -317,10 +415,9 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
               </form>
             </div>
 
-            {/* Registrar uso */}
             <div className="card p-6">
               <p className="text-sm font-medium text-gray-700 mb-1">Registrar férias usadas</p>
-              <p className="text-xs text-gray-400 mb-4">Os dias úteis são calculados automaticamente (exclui sábados e domingos).</p>
+              <p className="text-xs text-gray-400 mb-4">Dias úteis calculados automaticamente (exclui sábados e domingos).</p>
               {erroUso && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroUso}</div>}
               {sucessoUso && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoUso}</div>}
               <form onSubmit={registrarUso} className="grid grid-cols-2 gap-4">
@@ -342,10 +439,8 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                     onChange={e => setNovoUso(p => ({ ...p, data_fim: e.target.value }))} required />
                 </div>
                 {diasUteisCalc > 0 && (
-                  <div className="col-span-2">
-                    <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-700">
-                      <span className="font-semibold">{diasUteisCalc} dias úteis</span> no período selecionado
-                    </div>
+                  <div className="col-span-2 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-700">
+                    <span className="font-semibold">{diasUteisCalc} dias úteis</span> no período selecionado
                   </div>
                 )}
                 <div className="col-span-2">
@@ -401,7 +496,7 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Nome</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Cargo</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Admissão</th>
-                    <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Saldo atual</th>
+                    <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Saldo</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Status</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -414,7 +509,14 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                     const { saldo } = calcSaldo(f.id, periodos, usos)
                     return (
                       <tr key={f.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{f.nome}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-6 h-6 rounded-full ${coresPorFuncionario[f.id] || 'bg-gray-300'} flex items-center justify-center text-white text-xs font-semibold`}>
+                              {f.nome.charAt(0)}
+                            </div>
+                            <span className="font-medium text-gray-900">{f.nome}</span>
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-gray-500">{f.cargo || '—'}</td>
                         <td className="px-4 py-3 text-gray-500">{fmtDate(f.data_admissao)}</td>
                         <td className="px-4 py-3">
