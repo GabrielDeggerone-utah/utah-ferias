@@ -202,7 +202,7 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                     <div className="flex gap-5 text-center">
                       <div><p className="text-xs text-gray-400">Acumulado</p><p className="font-semibold text-gray-700 text-lg">{totalDireito}d</p></div>
                       <div><p className="text-xs text-gray-400">Usados</p><p className="font-semibold text-orange-500 text-lg">{usados}d</p></div>
-                      {agendados > 0 && <div><p className="text-xs text-gray-400">Agendados</p><p className="font-semibold text-amber-500 text-lg">{agendados}d</p></div>}
+                      {agendados > 0 && <div><p className="text-xs text-gray-400">Agendados</p><p className="font-semibold text-blue-500 text-lg">{agendados}d</p></div>}
                       <div><p className="text-xs text-gray-400">Saldo</p><p className={`font-bold text-lg ${saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>{saldo}d</p></div>
                     </div>
                   </div>
@@ -213,10 +213,10 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                         <span>Próx. renovação: {fmtDate(proxRen.toISOString().split('T')[0])} (+{DIAS_POR_ANO}d)</span>
                       </div>
                       <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
-                        <div className={`h-full transition-all ${pct >= 100 ? 'bg-red-400' : pct >= 75 ? 'bg-orange-400' : 'bg-green-400'}`} style={{ width: `${Math.round((usados / totalDireito) * 100)}%` }} />
-                        {agendados > 0 && <div className="h-full bg-amber-300 transition-all" style={{ width: `${Math.round((agendados / totalDireito) * 100)}%` }} />}
+                        <div className="h-full bg-orange-500 transition-all" style={{ width: `${Math.round((usados / totalDireito) * 100)}%` }} />
+                        {agendados > 0 && <div className="h-full bg-blue-400 transition-all" style={{ width: `${Math.round((agendados / totalDireito) * 100)}%` }} />}
                       </div>
-                      {agendados > 0 && <p className="text-xs text-amber-600 mt-1">■ laranja claro = agendados (ainda não tirados)</p>}
+                      {agendados > 0 && <p className="text-xs text-blue-500 mt-1">■ azul = agendados (ainda não tirados) · ■ laranja = já usados</p>}
                     </div>
                   ) : (
                     <div className="mb-3 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">Primeira renovação em {fmtDate(proxRen.toISOString().split('T')[0])}</div>
