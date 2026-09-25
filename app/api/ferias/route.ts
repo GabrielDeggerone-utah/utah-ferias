@@ -23,14 +23,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.tipo === 'uso') {
-    const { funcionario_id, data_inicio, data_fim, dias_uteis, observacao } = body
+    const { funcionario_id, data_inicio, data_fim, dias_uteis, observacao, agendado } = body
     if (!funcionario_id || !data_inicio || !data_fim || dias_uteis === undefined) {
       return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 })
     }
 
     const { data, error } = await supabase
       .from('usos_ferias')
-      .insert({ funcionario_id, data_inicio, data_fim, dias_uteis, observacao: observacao || null })
+      .insert({ funcionario_id, data_inicio, data_fim, dias_uteis, observacao: observacao || null, agendado: agendado ?? false })
       .select()
       .single()
 
