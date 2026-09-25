@@ -21,21 +21,21 @@ const DIAS_POR_ANO = 20
 function calcDiasAcumulados(dataAdmissao: string): { total: number; renovacoes: { cicloInicio: number; cicloFim: number; credito: string }[] } {
   const admissao = new Date(dataAdmissao + 'T12:00:00')
   const hoje = new Date()
-  const renovacoes: { cicloInicio: number; cicloFim: number; credito: string }[] = []
+  const renovacoes: { labelInicio: string; labelFim: string; credito: string }[] = []
 
-  // proxRenovacao = data de crédito (fim do ciclo aquisitivo)
+  // proxRenovacao = data de crédito (fim do ciclo aquisitivo = aniversário de admissão)
   let proxRenovacao = new Date(admissao)
   proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
 
   while (proxRenovacao <= hoje) {
-    const cicloInicio = proxRenovacao.getFullYear() - 1 // ano em que o ciclo COMEÇOU
-    if (cicloInicio >= 2025) {
-      renovacoes.push({
-        cicloInicio,
-        cicloFim: proxRenovacao.getFullYear(),
-        credito: proxRenovacao.toISOString().split('T')[0],
-      })
-    }
+    const anoInicioCiclo = proxRenovacao.getFullYear() - 1
+    const inicioDate = new Date(proxRenovacao)
+    inicioDate.setFullYear(anoInicioCiclo)
+    renovacoes.push({
+      labelInicio: `${MESES[inicioDate.getMonth()]}/${anoInicioCiclo}`,
+      labelFim: `${MESES[proxRenovacao.getMonth()]}/${proxRenovacao.getFullYear()}`,
+      credito: proxRenovacao.toISOString().split('T')[0],
+    })
     proxRenovacao = new Date(proxRenovacao)
     proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
   }
@@ -128,30 +128,29 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
   }
 
   // ── Uso de férias ─────────────────────────────────────────────────────────
-  const [novoUso, setNovoUso] = useState({ funcionario_id: '', data_inicio: '', data_fim: '', observacao: '' })
+  const [novoUso, setNovoUso] = useState({ funcionario_id: '', dias: '', observacao: '' })
   const [loadingUso, setLoadingUso] = useState(false)
   const [erroUso, setErroUso] = useState('')
   const [sucessoUso, setSucessoUso] = useState('')
 
-  const diasUteisCalc = novoUso.data_inicio && novoUso.data_fim && novoUso.data_fim >= novoUso.data_inicio
-    ? calcDiasUteis(novoUso.data_inicio, novoUso.data_fim)
-    : 0
-
   async function registrarUso(e: React.FormEvent) {
     e.preventDefault()
+    const dias = parseInt(novoUso.dias, 10)
+    if (!dias || dias <= 0) return
     setErroUso(''); setSucessoUso(''); setLoadingUso(true)
+    const hoje = new Date().toISOString().split('T')[0]
     const res = await fetch('/api/ferias', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'uso', ...novoUso, dias_uteis: diasUteisCalc }),
+      body: JSON.stringify({ tipo: 'uso', funcionario_id: novoUso.funcionario_id, data_inicio: hoje, data_fim: hoje, dias_uteis: dias, observacao: novoUso.observacao }),
     })
     const data = await res.json()
     setLoadingUso(false)
     if (!res.ok) { setErroUso(data.error || 'Erro'); return }
     const func = funcionarios.find(f => f.id === novoUso.funcionario_id)
-    setSucessoUso(`Férias de ${func?.nome} registradas (${diasUteisCalc} dias úteis)`)
+    setSucessoUso(`${dias} dias registrados para ${func?.nome}`)
     setUsos(prev => [data, ...prev])
-    setNovoUso(prev => ({ ...prev, data_inicio: '', data_fim: '', observacao: '' }))
+    setNovoUso(prev => ({ ...prev, dias: '', observacao: '' }))
   }
 
   async function deletarUso(id: string) {
@@ -265,7 +264,7 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                     <div className="flex flex-wrap gap-1.5">
                       {renovacoes.map(r => (
                         <span key={r.credito} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                          {r.cicloInicio}→{r.cicloFim} +{DIAS_POR_ANO}d
+                          {r.labelInicio} → {r.labelFim} +{DIAS_POR_ANO}d
                         </span>
                       ))}
                     </div>
@@ -300,7 +299,7 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                   data: r.credito,
                   tipo: 'credito' as const,
                   valor: DIAS_POR_ANO,
-                  label: `Ciclo ${r.cicloInicio}→${r.cicloFim}`,
+                  label: `Ciclo ${r.labelInicio} → ${r.labelFim}`,
                 })),
                 ...usosFuncionario.map(u => ({
                   data: u.data_inicio,
@@ -498,49 +497,62 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
 
         {/* ── TAB: Registrar ──────────────────────────────────────────────── */}
         {tab === 'registrar' && (
-          <div className="card p-6">
-            <p className="text-sm font-medium text-gray-700 mb-1">Registrar férias usadas</p>
-            <p className="text-xs text-gray-400 mb-4">Dias úteis calculados automaticamente (exclui sábados e domingos).</p>
-            {erroUso && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroUso}</div>}
-            {sucessoUso && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoUso}</div>}
-            <form onSubmit={registrarUso} className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="label">Funcionário *</label>
-                <select className="input" value={novoUso.funcionario_id} onChange={e => setNovoUso(p => ({ ...p, funcionario_id: e.target.value }))} required>
-                  <option value="">Selecione...</option>
-                  {funcAtivos.map(f => {
-                    const { total } = calcDiasAcumulados(f.data_admissao)
-                    const usado = usos.filter(u => u.funcionario_id === f.id).reduce((s, u) => s + u.dias_uteis, 0)
-                    return <option key={f.id} value={f.id}>{f.nome} (saldo: {total - usado}d)</option>
-                  })}
-                </select>
-              </div>
-              <div>
-                <label className="label">Data início *</label>
-                <input className="input" type="date" value={novoUso.data_inicio}
-                  onChange={e => setNovoUso(p => ({ ...p, data_inicio: e.target.value }))} required />
-              </div>
-              <div>
-                <label className="label">Data fim *</label>
-                <input className="input" type="date" value={novoUso.data_fim}
-                  onChange={e => setNovoUso(p => ({ ...p, data_fim: e.target.value }))} required />
-              </div>
-              {diasUteisCalc > 0 && (
-                <div className="col-span-2 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-700">
-                  <span className="font-semibold">{diasUteisCalc} dias úteis</span> no período selecionado
+          <div className="space-y-3">
+            <p className="text-xs text-gray-400 mb-4">Clique em um funcionário para lançar dias usados.</p>
+            {erroUso && <div className="bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroUso}</div>}
+            {sucessoUso && <div className="bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoUso}</div>}
+            {funcAtivos.map(f => {
+              const { total } = calcDiasAcumulados(f.data_admissao)
+              const totalDireito = total + (f.saldo_anterior ?? 0)
+              const usado = usos.filter(u => u.funcionario_id === f.id).reduce((s, u) => s + u.dias_uteis, 0)
+              const saldo = totalDireito - usado
+              const cor = coresPorFuncionario[f.id]
+              const aberto = novoUso.funcionario_id === f.id
+
+              return (
+                <div key={f.id} className="card overflow-hidden">
+                  <div
+                    className="px-5 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={() => setNovoUso(p => ({ ...p, funcionario_id: aberto ? '' : f.id, dias: '', observacao: '' }))}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full ${cor} flex items-center justify-center text-white text-sm font-semibold`}>
+                        {f.nome.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">{f.nome}</p>
+                        <p className="text-xs text-gray-400">{f.cargo || 'Sem cargo'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-sm font-bold ${saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {saldo}d de saldo
+                      </span>
+                      <span className="text-gray-300 text-lg">{aberto ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+
+                  {aberto && (
+                    <form onSubmit={registrarUso} className="px-5 pb-5 pt-1 border-t border-gray-100 flex gap-3 items-end">
+                      <div className="flex-1">
+                        <label className="label">Dias usados *</label>
+                        <input className="input" type="number" min="1" placeholder="Ex: 10"
+                          value={novoUso.dias} onChange={e => setNovoUso(p => ({ ...p, dias: e.target.value }))}
+                          autoFocus required />
+                      </div>
+                      <div className="flex-[2]">
+                        <label className="label">Observação</label>
+                        <input className="input" type="text" placeholder="Opcional (ex: Férias Jan/2025)"
+                          value={novoUso.observacao} onChange={e => setNovoUso(p => ({ ...p, observacao: e.target.value }))} />
+                      </div>
+                      <button className="btn-primary whitespace-nowrap" type="submit" disabled={loadingUso || !novoUso.dias}>
+                        {loadingUso ? 'Salvando...' : 'Lançar dias'}
+                      </button>
+                    </form>
+                  )}
                 </div>
-              )}
-              <div className="col-span-2">
-                <label className="label">Observação</label>
-                <input className="input" type="text" value={novoUso.observacao}
-                  onChange={e => setNovoUso(p => ({ ...p, observacao: e.target.value }))} placeholder="Opcional" />
-              </div>
-              <div className="col-span-2 flex justify-end">
-                <button className="btn-primary" type="submit" disabled={loadingUso || diasUteisCalc === 0}>
-                  {loadingUso ? 'Registrando...' : 'Registrar férias'}
-                </button>
-              </div>
-            </form>
+              )
+            })}
           </div>
         )}
 
