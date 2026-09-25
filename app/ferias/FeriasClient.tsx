@@ -3,14 +3,37 @@ import { useState } from 'react'
 import Layout from '@/components/Layout'
 
 type Funcionario = { id: string; nome: string; data_admissao: string; cargo: string | null; ativo: boolean }
-type Periodo = { id: string; funcionario_id: string; ano: number; dias_direito: number; observacao: string | null }
 type Uso = { id: string; funcionario_id: string; data_inicio: string; data_fim: string; dias_uteis: number; observacao: string | null; created_at: string }
 
 type Props = {
   email: string
   funcionarios: Funcionario[]
-  periodos: Periodo[]
   usos: Uso[]
+}
+
+const DIAS_POR_ANO = 20
+
+// Calcula dias acumulados automaticamente:
+// +20 dias a cada ano a partir do 1º aniversário de admissão (mesmo mês)
+function calcDiasAcumulados(dataAdmissao: string): { total: number; renovacoes: { ano: number; mes: number; data: string }[] } {
+  const admissao = new Date(dataAdmissao + 'T12:00:00')
+  const hoje = new Date()
+  const renovacoes: { ano: number; mes: number; data: string }[] = []
+
+  let proxRenovacao = new Date(admissao)
+  proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
+
+  while (proxRenovacao <= hoje) {
+    renovacoes.push({
+      ano: proxRenovacao.getFullYear(),
+      mes: proxRenovacao.getMonth() + 1,
+      data: proxRenovacao.toISOString().split('T')[0],
+    })
+    proxRenovacao = new Date(proxRenovacao)
+    proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
+  }
+
+  return { total: renovacoes.length * DIAS_POR_ANO, renovacoes }
 }
 
 function calcDiasUteis(inicio: string, fim: string): number {
@@ -26,34 +49,30 @@ function calcDiasUteis(inicio: string, fim: string): number {
   return count
 }
 
-function calcSaldo(fid: string, periodos: Periodo[], usos: Uso[]) {
-  const totalDireito = periodos.filter(p => p.funcionario_id === fid).reduce((s, p) => s + p.dias_direito, 0)
-  const totalUsado = usos.filter(u => u.funcionario_id === fid).reduce((s, u) => s + u.dias_uteis, 0)
-  return { totalDireito, totalUsado, saldo: totalDireito - totalUsado }
-}
-
 function fmtDate(d: string) {
   if (!d) return ''
-  const [y, m, day] = d.split('T')[0].split('-')
+  const part = d.split('T')[0]
+  const [y, m, day] = part.split('-')
   return `${day}/${m}/${y}`
 }
 
-function getAno(d: string) {
-  return d.split('T')[0].split('-')[0]
-}
-
+function getAno(d: string) { return d.split('T')[0].split('-')[0] }
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
-
 function fmtMesAno(d: string) {
-  const [,m,] = d.split('T')[0].split('-')
+  const [,m] = d.split('T')[0].split('-')
   return MESES[parseInt(m) - 1]
 }
 
-export default function FeriasClient({ email, funcionarios: fInit, periodos: pInit, usos: uInit }: Props) {
+const CORES = ['bg-blue-500','bg-purple-500','bg-green-500','bg-orange-500','bg-pink-500','bg-teal-500','bg-indigo-500','bg-red-500']
+
+export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }: Props) {
   const [tab, setTab] = useState<'saldos' | 'historico' | 'registrar' | 'funcionarios'>('saldos')
   const [funcionarios, setFuncionarios] = useState(fInit)
-  const [periodos, setPeriodos] = useState(pInit)
   const [usos, setUsos] = useState(uInit)
+
+  const funcAtivos = funcionarios.filter(f => f.ativo)
+  const coresPorFuncionario: Record<string, string> = {}
+  funcAtivos.forEach((f, i) => { coresPorFuncionario[f.id] = CORES[i % CORES.length] })
 
   // ── Novo funcionário ──────────────────────────────────────────────────────
   const [novoFunc, setNovoFunc] = useState({ nome: '', data_admissao: '', cargo: '' })
@@ -84,40 +103,6 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
       body: JSON.stringify({ id: f.id, ativo: !f.ativo }),
     })
     setFuncionarios(prev => prev.map(x => x.id === f.id ? { ...x, ativo: !x.ativo } : x))
-  }
-
-  // ── Período de direito ────────────────────────────────────────────────────
-  const [novoPeriodo, setNovoPeriodo] = useState({ funcionario_id: '', ano: new Date().getFullYear(), dias_direito: 30, observacao: '' })
-  const [loadingPer, setLoadingPer] = useState(false)
-  const [erroPer, setErroPer] = useState('')
-  const [sucessoPer, setSucessoPer] = useState('')
-
-  async function salvarPeriodo(e: React.FormEvent) {
-    e.preventDefault()
-    setErroPer(''); setSucessoPer(''); setLoadingPer(true)
-    const res = await fetch('/api/ferias', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo: 'periodo', ...novoPeriodo }),
-    })
-    const data = await res.json()
-    setLoadingPer(false)
-    if (!res.ok) { setErroPer(data.error || 'Erro'); return }
-    setSucessoPer('Período salvo!')
-    setPeriodos(prev => {
-      const sem = prev.filter(p => !(p.funcionario_id === data.funcionario_id && p.ano === data.ano))
-      return [...sem, data].sort((a, b) => a.ano - b.ano)
-    })
-  }
-
-  async function deletarPeriodo(id: string) {
-    if (!confirm('Remover este período?')) return
-    await fetch('/api/ferias', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, tipo: 'periodo' }),
-    })
-    setPeriodos(prev => prev.filter(p => p.id !== id))
   }
 
   // ── Uso de férias ─────────────────────────────────────────────────────────
@@ -157,19 +142,12 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
     setUsos(prev => prev.filter(u => u.id !== id))
   }
 
-  const funcAtivos = funcionarios.filter(f => f.ativo)
-
-  // Cores por funcionário
-  const CORES = ['bg-blue-500','bg-purple-500','bg-green-500','bg-orange-500','bg-pink-500','bg-teal-500','bg-indigo-500','bg-red-500']
-  const coresPorFuncionario: Record<string, string> = {}
-  funcAtivos.forEach((f, i) => { coresPorFuncionario[f.id] = CORES[i % CORES.length] })
-
   return (
     <Layout email={email}>
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="mb-6">
           <h1 className="text-lg font-semibold text-gray-900">Controle de Férias</h1>
-          <p className="text-sm text-gray-500">Escritório Utah Invest — somente dias úteis</p>
+          <p className="text-sm text-gray-500">Escritório Utah Invest — somente dias úteis · +{DIAS_POR_ANO}d por ano no mês de admissão</p>
         </div>
 
         {/* Tabs */}
@@ -180,11 +158,8 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
             { key: 'registrar', label: 'Registrar férias' },
             { key: 'funcionarios', label: 'Funcionários' },
           ] as const).map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-utah-500 text-utah-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            >
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-utah-500 text-utah-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {t.label}
             </button>
           ))}
@@ -199,26 +174,38 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
               </div>
             )}
             {funcAtivos.map(f => {
-              const { totalDireito, totalUsado, saldo } = calcSaldo(f.id, periodos, usos)
-              const persFuncionario = periodos.filter(p => p.funcionario_id === f.id).sort((a, b) => a.ano - b.ano)
+              const { total: totalDireito, renovacoes } = calcDiasAcumulados(f.data_admissao)
+              const totalUsado = usos.filter(u => u.funcionario_id === f.id).reduce((s, u) => s + u.dias_uteis, 0)
+              const saldo = totalDireito - totalUsado
               const pct = totalDireito > 0 ? Math.min(100, Math.round((totalUsado / totalDireito) * 100)) : 0
+              const cor = coresPorFuncionario[f.id]
+
+              // Próxima renovação
+              const admissao = new Date(f.data_admissao + 'T12:00:00')
+              const proxRen = new Date(admissao)
+              const hoje = new Date()
+              proxRen.setFullYear(proxRen.getFullYear() + 1)
+              while (proxRen <= hoje) proxRen.setFullYear(proxRen.getFullYear() + 1)
 
               return (
                 <div key={f.id} className="card p-5">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-full ${coresPorFuncionario[f.id]} flex items-center justify-center text-white text-sm font-semibold`}>
+                      <div className={`w-9 h-9 rounded-full ${cor} flex items-center justify-center text-white text-sm font-semibold`}>
                         {f.nome.charAt(0)}
                       </div>
                       <div>
                         <p className="font-semibold text-gray-900">{f.nome}</p>
-                        <p className="text-xs text-gray-400">{f.cargo || 'Sem cargo'} · desde {fmtDate(f.data_admissao)}</p>
+                        <p className="text-xs text-gray-400">
+                          {f.cargo || 'Sem cargo'} · desde {fmtDate(f.data_admissao)} · renova todo {MESES[admissao.getMonth()]}
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-6 text-center">
                       <div>
-                        <p className="text-xs text-gray-400">Direito total</p>
+                        <p className="text-xs text-gray-400">Acumulado</p>
                         <p className="font-semibold text-gray-700 text-lg">{totalDireito}d</p>
+                        <p className="text-xs text-gray-400">{renovacoes.length} renov.</p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400">Usados</p>
@@ -232,28 +219,29 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                   </div>
 
                   {/* Barra */}
-                  {totalDireito > 0 && (
+                  {totalDireito > 0 ? (
                     <div className="mb-3">
                       <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>{pct}% utilizado</span>
-                        <span>{totalDireito - totalUsado} dias restantes</span>
+                        <span>Próxima renovação: {fmtDate(proxRen.toISOString().split('T')[0])} (+{DIAS_POR_ANO}d)</span>
                       </div>
                       <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-red-400' : pct >= 75 ? 'bg-orange-400' : 'bg-green-400'}`}
-                          style={{ width: `${pct}%` }}
-                        />
+                        <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-red-400' : pct >= 75 ? 'bg-orange-400' : 'bg-green-400'}`}
+                          style={{ width: `${pct}%` }} />
                       </div>
+                    </div>
+                  ) : (
+                    <div className="mb-3 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+                      Ainda sem dias acumulados — primeira renovação em {fmtDate(proxRen.toISOString().split('T')[0])}
                     </div>
                   )}
 
-                  {/* Anos de direito */}
-                  {persFuncionario.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {persFuncionario.map(p => (
-                        <span key={p.id} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                          {p.ano}: {p.dias_direito}d
-                          <button onClick={() => deletarPeriodo(p.id)} className="ml-1 text-blue-300 hover:text-blue-600">✕</button>
+                  {/* Renovações passadas */}
+                  {renovacoes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {renovacoes.map(r => (
+                        <span key={r.data} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                          {MESES[r.mes - 1]}/{r.ano} +{DIAS_POR_ANO}d
                         </span>
                       ))}
                     </div>
@@ -273,22 +261,20 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
             {funcAtivos.map(f => {
               const usosFuncionario = usos.filter(u => u.funcionario_id === f.id)
                 .sort((a, b) => b.data_inicio.localeCompare(a.data_inicio))
-
-              // Agrupar por ano
               const porAno: Record<string, Uso[]> = {}
               usosFuncionario.forEach(u => {
                 const ano = getAno(u.data_inicio)
                 if (!porAno[ano]) porAno[ano] = []
                 porAno[ano].push(u)
               })
-
               const anos = Object.keys(porAno).sort((a, b) => b.localeCompare(a))
               const cor = coresPorFuncionario[f.id]
+              const { total: totalDireito } = calcDiasAcumulados(f.data_admissao)
+              const totalUsado = usosFuncionario.reduce((s, u) => s + u.dias_uteis, 0)
 
               return (
                 <div key={f.id} className="card overflow-hidden">
-                  {/* Header */}
-                  <div className={`px-5 py-4 flex items-center justify-between ${cor} bg-opacity-10`} style={{background: 'linear-gradient(to right, #f8f9fa, #f1f3f5)'}}>
+                  <div className="px-5 py-4 flex items-center justify-between bg-gray-50 border-b border-gray-100">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-full ${cor} flex items-center justify-center text-white text-sm font-semibold`}>
                         {f.nome.charAt(0)}
@@ -298,9 +284,19 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                         <p className="text-xs text-gray-500">{f.cargo || 'Sem cargo'}</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500">Total de registros</p>
-                      <p className="font-bold text-gray-800">{usosFuncionario.length} período{usosFuncionario.length !== 1 ? 's' : ''}</p>
+                    <div className="flex gap-4 text-right text-sm">
+                      <div>
+                        <p className="text-xs text-gray-400">Acumulado</p>
+                        <p className="font-semibold text-gray-700">{totalDireito}d</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Usados</p>
+                        <p className="font-semibold text-orange-500">{totalUsado}d</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Saldo</p>
+                        <p className={`font-bold ${totalDireito - totalUsado >= 0 ? 'text-green-600' : 'text-red-600'}`}>{totalDireito - totalUsado}d</p>
+                      </div>
                     </div>
                   </div>
 
@@ -311,34 +307,22 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                       {anos.map(ano => {
                         const usosAno = porAno[ano]
                         const totalAno = usosAno.reduce((s, u) => s + u.dias_uteis, 0)
-                        const periodoAno = periodos.find(p => p.funcionario_id === f.id && p.ano === parseInt(ano))
-
                         return (
                           <div key={ano} className="px-5 py-4">
                             <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-gray-700">{ano}</span>
-                                {periodoAno && (
-                                  <span className="text-xs text-gray-400">({periodoAno.dias_direito}d de direito)</span>
-                                )}
-                              </div>
+                              <span className="text-sm font-semibold text-gray-700">{ano}</span>
                               <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
                                 {totalAno}d úteis usados
                               </span>
                             </div>
-
-                            {/* Timeline */}
                             <div className="space-y-2">
                               {usosAno.map((u, i) => (
                                 <div key={u.id} className="flex items-start gap-3 group">
-                                  {/* Linha do tempo */}
-                                  <div className="flex flex-col items-center mt-1">
+                                  <div className="flex flex-col items-center mt-1.5">
                                     <div className={`w-2.5 h-2.5 rounded-full ${cor} flex-shrink-0`} />
-                                    {i < usosAno.length - 1 && <div className="w-0.5 h-full bg-gray-200 mt-1 min-h-[20px]" />}
+                                    {i < usosAno.length - 1 && <div className="w-0.5 bg-gray-200 mt-1 min-h-[20px]" />}
                                   </div>
-
-                                  {/* Conteúdo */}
-                                  <div className="flex-1 flex items-center justify-between pb-2">
+                                  <div className="flex-1 flex items-center justify-between pb-1">
                                     <div>
                                       <div className="flex items-center gap-2">
                                         <span className="text-sm text-gray-800 font-medium">
@@ -348,18 +332,12 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                                           {fmtMesAno(u.data_inicio)}
                                         </span>
                                       </div>
-                                      {u.observacao && (
-                                        <p className="text-xs text-gray-400 mt-0.5">{u.observacao}</p>
-                                      )}
+                                      {u.observacao && <p className="text-xs text-gray-400 mt-0.5">{u.observacao}</p>}
                                     </div>
                                     <div className="flex items-center gap-3">
                                       <span className="text-sm font-semibold text-orange-600">{u.dias_uteis}d úteis</span>
-                                      <button
-                                        onClick={() => deletarUso(u.id)}
-                                        className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-opacity text-xs"
-                                      >
-                                        ✕
-                                      </button>
+                                      <button onClick={() => deletarUso(u.id)}
+                                        className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 transition-opacity text-xs">✕</button>
                                     </div>
                                   </div>
                                 </div>
@@ -378,83 +356,49 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
 
         {/* ── TAB: Registrar ──────────────────────────────────────────────── */}
         {tab === 'registrar' && (
-          <div className="space-y-6">
-            <div className="card p-6">
-              <p className="text-sm font-medium text-gray-700 mb-1">Adicionar dias de direito por ano</p>
-              <p className="text-xs text-gray-400 mb-4">Os dias acumulam automaticamente entre anos.</p>
-              {erroPer && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroPer}</div>}
-              {sucessoPer && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoPer}</div>}
-              <form onSubmit={salvarPeriodo} className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Funcionário *</label>
-                  <select className="input" value={novoPeriodo.funcionario_id} onChange={e => setNovoPeriodo(p => ({ ...p, funcionario_id: e.target.value }))} required>
-                    <option value="">Selecione...</option>
-                    {funcAtivos.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                  </select>
+          <div className="card p-6">
+            <p className="text-sm font-medium text-gray-700 mb-1">Registrar férias usadas</p>
+            <p className="text-xs text-gray-400 mb-4">Dias úteis calculados automaticamente (exclui sábados e domingos).</p>
+            {erroUso && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroUso}</div>}
+            {sucessoUso && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoUso}</div>}
+            <form onSubmit={registrarUso} className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="label">Funcionário *</label>
+                <select className="input" value={novoUso.funcionario_id} onChange={e => setNovoUso(p => ({ ...p, funcionario_id: e.target.value }))} required>
+                  <option value="">Selecione...</option>
+                  {funcAtivos.map(f => {
+                    const { total } = calcDiasAcumulados(f.data_admissao)
+                    const usado = usos.filter(u => u.funcionario_id === f.id).reduce((s, u) => s + u.dias_uteis, 0)
+                    return <option key={f.id} value={f.id}>{f.nome} (saldo: {total - usado}d)</option>
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="label">Data início *</label>
+                <input className="input" type="date" value={novoUso.data_inicio}
+                  onChange={e => setNovoUso(p => ({ ...p, data_inicio: e.target.value }))} required />
+              </div>
+              <div>
+                <label className="label">Data fim *</label>
+                <input className="input" type="date" value={novoUso.data_fim}
+                  onChange={e => setNovoUso(p => ({ ...p, data_fim: e.target.value }))} required />
+              </div>
+              {diasUteisCalc > 0 && (
+                <div className="col-span-2 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-700">
+                  <span className="font-semibold">{diasUteisCalc} dias úteis</span> no período selecionado
                 </div>
-                <div>
-                  <label className="label">Ano *</label>
-                  <input className="input" type="number" min="2000" max="2100" value={novoPeriodo.ano}
-                    onChange={e => setNovoPeriodo(p => ({ ...p, ano: Number(e.target.value) }))} required />
-                </div>
-                <div>
-                  <label className="label">Dias de direito *</label>
-                  <input className="input" type="number" min="1" max="60" value={novoPeriodo.dias_direito}
-                    onChange={e => setNovoPeriodo(p => ({ ...p, dias_direito: Number(e.target.value) }))} required />
-                </div>
-                <div>
-                  <label className="label">Observação</label>
-                  <input className="input" type="text" value={novoPeriodo.observacao}
-                    onChange={e => setNovoPeriodo(p => ({ ...p, observacao: e.target.value }))} placeholder="Opcional" />
-                </div>
-                <div className="col-span-2 flex justify-end">
-                  <button className="btn-secondary" type="submit" disabled={loadingPer}>
-                    {loadingPer ? 'Salvando...' : 'Salvar período'}
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            <div className="card p-6">
-              <p className="text-sm font-medium text-gray-700 mb-1">Registrar férias usadas</p>
-              <p className="text-xs text-gray-400 mb-4">Dias úteis calculados automaticamente (exclui sábados e domingos).</p>
-              {erroUso && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroUso}</div>}
-              {sucessoUso && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoUso}</div>}
-              <form onSubmit={registrarUso} className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="label">Funcionário *</label>
-                  <select className="input" value={novoUso.funcionario_id} onChange={e => setNovoUso(p => ({ ...p, funcionario_id: e.target.value }))} required>
-                    <option value="">Selecione...</option>
-                    {funcAtivos.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Data início *</label>
-                  <input className="input" type="date" value={novoUso.data_inicio}
-                    onChange={e => setNovoUso(p => ({ ...p, data_inicio: e.target.value }))} required />
-                </div>
-                <div>
-                  <label className="label">Data fim *</label>
-                  <input className="input" type="date" value={novoUso.data_fim}
-                    onChange={e => setNovoUso(p => ({ ...p, data_fim: e.target.value }))} required />
-                </div>
-                {diasUteisCalc > 0 && (
-                  <div className="col-span-2 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-700">
-                    <span className="font-semibold">{diasUteisCalc} dias úteis</span> no período selecionado
-                  </div>
-                )}
-                <div className="col-span-2">
-                  <label className="label">Observação</label>
-                  <input className="input" type="text" value={novoUso.observacao}
-                    onChange={e => setNovoUso(p => ({ ...p, observacao: e.target.value }))} placeholder="Opcional" />
-                </div>
-                <div className="col-span-2 flex justify-end">
-                  <button className="btn-primary" type="submit" disabled={loadingUso || diasUteisCalc === 0}>
-                    {loadingUso ? 'Registrando...' : 'Registrar férias'}
-                  </button>
-                </div>
-              </form>
-            </div>
+              )}
+              <div className="col-span-2">
+                <label className="label">Observação</label>
+                <input className="input" type="text" value={novoUso.observacao}
+                  onChange={e => setNovoUso(p => ({ ...p, observacao: e.target.value }))} placeholder="Opcional" />
+              </div>
+              <div className="col-span-2 flex justify-end">
+                <button className="btn-primary" type="submit" disabled={loadingUso || diasUteisCalc === 0}>
+                  {loadingUso ? 'Registrando...' : 'Registrar férias'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
@@ -462,7 +406,10 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
         {tab === 'funcionarios' && (
           <div>
             <div className="card p-6 mb-6">
-              <p className="text-sm font-medium text-gray-700 mb-4">Novo funcionário</p>
+              <p className="text-sm font-medium text-gray-700 mb-1">Novo funcionário</p>
+              <p className="text-xs text-gray-400 mb-4">
+                Os dias de férias são acumulados automaticamente: +{DIAS_POR_ANO} dias úteis todo ano no mês de admissão, a partir do 1º aniversário.
+              </p>
               {erroFunc && <div className="mb-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-lg px-4 py-3">{erroFunc}</div>}
               {sucessoFunc && <div className="mb-4 bg-green-50 border border-green-100 text-green-800 text-sm rounded-lg px-4 py-3">{sucessoFunc}</div>}
               <form onSubmit={criarFuncionario} className="grid grid-cols-3 gap-4">
@@ -496,6 +443,7 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Nome</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Cargo</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Admissão</th>
+                    <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Renova em</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Saldo</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Status</th>
                     <th className="px-4 py-3" />
@@ -503,10 +451,18 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {funcionarios.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-400">Nenhum funcionário cadastrado.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-400">Nenhum funcionário cadastrado.</td></tr>
                   )}
                   {funcionarios.map(f => {
-                    const { saldo } = calcSaldo(f.id, periodos, usos)
+                    const { total } = calcDiasAcumulados(f.data_admissao)
+                    const usado = usos.filter(u => u.funcionario_id === f.id).reduce((s, u) => s + u.dias_uteis, 0)
+                    const saldo = total - usado
+                    const admissao = new Date(f.data_admissao + 'T12:00:00')
+                    const proxRen = new Date(admissao)
+                    const hoje = new Date()
+                    proxRen.setFullYear(proxRen.getFullYear() + 1)
+                    while (proxRen <= hoje) proxRen.setFullYear(proxRen.getFullYear() + 1)
+
                     return (
                       <tr key={f.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
@@ -519,6 +475,7 @@ export default function FeriasClient({ email, funcionarios: fInit, periodos: pIn
                         </td>
                         <td className="px-4 py-3 text-gray-500">{f.cargo || '—'}</td>
                         <td className="px-4 py-3 text-gray-500">{fmtDate(f.data_admissao)}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(proxRen.toISOString().split('T')[0])}</td>
                         <td className="px-4 py-3">
                           <span className={`font-semibold ${saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>{saldo}d</span>
                         </td>

@@ -12,11 +12,6 @@ export default async function FeriasPage() {
     .select('*')
     .order('nome')
 
-  const { data: periodos } = await supabase
-    .from('periodos_ferias')
-    .select('*')
-    .order('ano')
-
   const { data: usos } = await supabase
     .from('usos_ferias')
     .select('*')
@@ -26,7 +21,6 @@ export default async function FeriasPage() {
     <FeriasClient
       email={user.email ?? ''}
       funcionarios={funcionarios ?? []}
-      periodos={periodos ?? []}
       usos={usos ?? []}
     />
   )
