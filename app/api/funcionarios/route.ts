@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
-  const { id, nome, data_admissao, cargo, ativo } = await req.json()
+  const { id, nome, data_admissao, cargo, ativo, saldo_anterior } = await req.json()
   if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 })
 
   const updates: Record<string, unknown> = {}
@@ -32,6 +32,7 @@ export async function PATCH(req: NextRequest) {
   if (data_admissao !== undefined) updates.data_admissao = data_admissao
   if (cargo !== undefined) updates.cargo = cargo
   if (ativo !== undefined) updates.ativo = ativo
+  if (saldo_anterior !== undefined) updates.saldo_anterior = saldo_anterior
 
   const { error } = await supabase.from('funcionarios').update(updates).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

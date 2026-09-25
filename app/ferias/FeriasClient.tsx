@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import Layout from '@/components/Layout'
 
-type Funcionario = { id: string; nome: string; data_admissao: string; cargo: string | null; ativo: boolean }
+type Funcionario = { id: string; nome: string; data_admissao: string; cargo: string | null; ativo: boolean; saldo_anterior: number }
 type Uso = { id: string; funcionario_id: string; data_inicio: string; data_fim: string; dias_uteis: number; observacao: string | null; created_at: string }
 
 type Props = {
@@ -112,6 +112,21 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
     setFuncionarios(prev => prev.map(x => x.id === f.id ? { ...x, ativo: !x.ativo } : x))
   }
 
+  const [editandoSaldo, setEditandoSaldo] = useState<string | null>(null)
+  const [saldoInputs, setSaldoInputs] = useState<Record<string, string>>({})
+
+  async function salvarSaldoAnterior(f: Funcionario) {
+    const val = parseInt(saldoInputs[f.id] ?? String(f.saldo_anterior), 10)
+    if (isNaN(val)) return
+    await fetch('/api/funcionarios', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: f.id, saldo_anterior: val }),
+    })
+    setFuncionarios(prev => prev.map(x => x.id === f.id ? { ...x, saldo_anterior: val } : x))
+    setEditandoSaldo(null)
+  }
+
   // ── Uso de férias ─────────────────────────────────────────────────────────
   const [novoUso, setNovoUso] = useState({ funcionario_id: '', data_inicio: '', data_fim: '', observacao: '' })
   const [loadingUso, setLoadingUso] = useState(false)
@@ -182,7 +197,8 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
               </div>
             )}
             {funcAtivos.map(f => {
-              const { total: totalDireito, renovacoes } = calcDiasAcumulados(f.data_admissao)
+              const { total, renovacoes } = calcDiasAcumulados(f.data_admissao)
+              const totalDireito = total + (f.saldo_anterior ?? 0)
               const totalUsado = usos.filter(u => u.funcionario_id === f.id).reduce((s, u) => s + u.dias_uteis, 0)
               const saldo = totalDireito - totalUsado
               const pct = totalDireito > 0 ? Math.min(100, Math.round((totalUsado / totalDireito) * 100)) : 0
@@ -271,9 +287,15 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
               const usosFuncionario = usos.filter(u => u.funcionario_id === f.id)
               const cor = coresPorFuncionario[f.id]
 
-              // Monta extrato: créditos + usos ordenados por data
-              type Evento = { data: string; tipo: 'credito' | 'uso'; valor: number; label: string; saldo: number }
-              const eventos: Omit<Evento, 'saldo'>[] = [
+              // Monta extrato: saldo anterior + créditos + usos ordenados por data
+              type Evento = { data: string; tipo: 'anterior' | 'credito' | 'uso'; valor: number; label: string; saldo: number }
+              const eventosBase: Omit<Evento, 'saldo'>[] = [
+                ...(f.saldo_anterior !== 0 ? [{
+                  data: '2024-12-31',
+                  tipo: 'anterior' as const,
+                  valor: f.saldo_anterior,
+                  label: 'Saldo anterior (até dez/2024)',
+                }] : []),
                 ...renovacoes.map(r => ({
                   data: r.credito,
                   tipo: 'credito' as const,
@@ -290,13 +312,13 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
 
               // Calcula saldo corrente a cada evento
               let saldoCorrendo = 0
-              const extrato: Evento[] = eventos.map(e => {
-                saldoCorrendo += e.tipo === 'credito' ? e.valor : -e.valor
+              const extrato: Evento[] = eventosBase.map(e => {
+                saldoCorrendo += e.tipo === 'uso' ? -e.valor : e.valor
                 return { ...e, saldo: saldoCorrendo }
               })
 
               const saldoFinal = extrato.length > 0 ? extrato[extrato.length - 1].saldo : 0
-              const totalCredito = renovacoes.length * DIAS_POR_ANO
+              const totalCredito = renovacoes.length * DIAS_POR_ANO + f.saldo_anterior
               const totalUso = usosFuncionario.reduce((s, u) => s + u.dias_uteis, 0)
 
               return (
@@ -336,17 +358,17 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                       {extrato.map((e, i) => (
                         <div key={i} className="px-5 py-3 flex items-center justify-between hover:bg-gray-50">
                           <div className="flex items-center gap-3">
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${e.tipo === 'credito' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-500'}`}>
-                              {e.tipo === 'credito' ? '+' : '-'}
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${e.tipo === 'uso' ? 'bg-orange-50 text-orange-500' : e.tipo === 'anterior' ? 'bg-gray-100 text-gray-500' : 'bg-blue-50 text-blue-600'}`}>
+                              {e.tipo === 'uso' ? '-' : '+'}
                             </div>
                             <div>
                               <p className="text-sm text-gray-800">{e.label}</p>
-                              <p className="text-xs text-gray-400">{fmtDate(e.data)}</p>
+                              <p className="text-xs text-gray-400">{e.tipo === 'anterior' ? 'Lançamento manual' : fmtDate(e.data)}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-6 text-right">
-                            <span className={`text-sm font-semibold w-14 ${e.tipo === 'credito' ? 'text-blue-600' : 'text-orange-500'}`}>
-                              {e.tipo === 'credito' ? '+' : '-'}{e.valor}d
+                            <span className={`text-sm font-semibold w-14 ${e.tipo === 'uso' ? 'text-orange-500' : e.tipo === 'anterior' ? 'text-gray-600' : 'text-blue-600'}`}>
+                              {e.tipo === 'uso' ? '-' : '+'}{e.valor}d
                             </span>
                             <span className={`text-sm font-bold w-14 ${e.saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                               {e.saldo}d
@@ -564,7 +586,8 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Cargo</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Admissão</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Renova em</th>
-                    <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Saldo</th>
+                    <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Saldo anterior</th>
+                    <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Saldo total</th>
                     <th className="text-left text-xs font-medium text-gray-500 px-4 py-3">Status</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -596,6 +619,28 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                         <td className="px-4 py-3 text-gray-500">{f.cargo || '—'}</td>
                         <td className="px-4 py-3 text-gray-500">{fmtDate(f.data_admissao)}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(proxRen.toISOString().split('T')[0])}</td>
+                        <td className="px-4 py-3">
+                          {editandoSaldo === f.id ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                className="w-16 border border-gray-200 rounded px-2 py-0.5 text-sm"
+                                value={saldoInputs[f.id] ?? String(f.saldo_anterior)}
+                                onChange={e => setSaldoInputs(p => ({ ...p, [f.id]: e.target.value }))}
+                                onKeyDown={e => { if (e.key === 'Enter') salvarSaldoAnterior(f); if (e.key === 'Escape') setEditandoSaldo(null) }}
+                                autoFocus
+                              />
+                              <button onClick={() => salvarSaldoAnterior(f)} className="text-green-600 text-xs font-medium">✓</button>
+                              <button onClick={() => setEditandoSaldo(null)} className="text-gray-400 text-xs">✕</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setEditandoSaldo(f.id); setSaldoInputs(p => ({ ...p, [f.id]: String(f.saldo_anterior) })) }}
+                              className="flex items-center gap-1 group text-sm text-gray-600 hover:text-utah-600">
+                              <span className="font-medium">{f.saldo_anterior}d</span>
+                              <span className="text-gray-300 group-hover:text-utah-400 text-xs">✏</span>
+                            </button>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`font-semibold ${saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>{saldo}d</span>
                         </td>
