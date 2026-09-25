@@ -73,7 +73,7 @@ function fmtMesAno(d: string) {
 const CORES = ['bg-blue-500','bg-purple-500','bg-green-500','bg-orange-500','bg-pink-500','bg-teal-500','bg-indigo-500','bg-red-500']
 
 export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }: Props) {
-  const [tab, setTab] = useState<'saldos' | 'historico' | 'registrar' | 'funcionarios'>('saldos')
+  const [tab, setTab] = useState<'saldos' | 'acumulado' | 'historico' | 'registrar' | 'funcionarios'>('saldos')
   const [funcionarios, setFuncionarios] = useState(fInit)
   const [usos, setUsos] = useState(uInit)
 
@@ -161,6 +161,7 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
         <div className="flex gap-1 mb-6 border-b border-gray-200">
           {([
             { key: 'saldos', label: 'Saldos' },
+            { key: 'acumulado', label: 'Acumulado' },
             { key: 'historico', label: 'Histórico' },
             { key: 'registrar', label: 'Registrar férias' },
             { key: 'funcionarios', label: 'Funcionários' },
@@ -251,6 +252,118 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                           {r.cicloInicio}→{r.cicloFim} +{DIAS_POR_ANO}d
                         </span>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── TAB: Acumulado ──────────────────────────────────────────────── */}
+        {tab === 'acumulado' && (
+          <div className="space-y-6">
+            {funcAtivos.length === 0 && (
+              <div className="card p-8 text-center text-gray-400 text-sm">Nenhum funcionário cadastrado.</div>
+            )}
+            {funcAtivos.map(f => {
+              const { renovacoes } = calcDiasAcumulados(f.data_admissao)
+              const usosFuncionario = usos.filter(u => u.funcionario_id === f.id)
+              const cor = coresPorFuncionario[f.id]
+
+              // Monta extrato: créditos + usos ordenados por data
+              type Evento = { data: string; tipo: 'credito' | 'uso'; valor: number; label: string; saldo: number }
+              const eventos: Omit<Evento, 'saldo'>[] = [
+                ...renovacoes.map(r => ({
+                  data: r.credito,
+                  tipo: 'credito' as const,
+                  valor: DIAS_POR_ANO,
+                  label: `Ciclo ${r.cicloInicio}→${r.cicloFim}`,
+                })),
+                ...usosFuncionario.map(u => ({
+                  data: u.data_inicio,
+                  tipo: 'uso' as const,
+                  valor: u.dias_uteis,
+                  label: `${fmtDate(u.data_inicio)} → ${fmtDate(u.data_fim)}${u.observacao ? ` · ${u.observacao}` : ''}`,
+                })),
+              ].sort((a, b) => a.data.localeCompare(b.data))
+
+              // Calcula saldo corrente a cada evento
+              let saldoCorrendo = 0
+              const extrato: Evento[] = eventos.map(e => {
+                saldoCorrendo += e.tipo === 'credito' ? e.valor : -e.valor
+                return { ...e, saldo: saldoCorrendo }
+              })
+
+              const saldoFinal = extrato.length > 0 ? extrato[extrato.length - 1].saldo : 0
+              const totalCredito = renovacoes.length * DIAS_POR_ANO
+              const totalUso = usosFuncionario.reduce((s, u) => s + u.dias_uteis, 0)
+
+              return (
+                <div key={f.id} className="card overflow-hidden">
+                  {/* Header */}
+                  <div className="px-5 py-4 flex items-center justify-between bg-gray-50 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full ${cor} flex items-center justify-center text-white text-sm font-semibold`}>
+                        {f.nome.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-900">{f.nome}</p>
+                        <p className="text-xs text-gray-400">desde {fmtDate(f.data_admissao)}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-5 text-right">
+                      <div>
+                        <p className="text-xs text-gray-400">Créditos</p>
+                        <p className="font-semibold text-blue-600">+{totalCredito}d</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Débitos</p>
+                        <p className="font-semibold text-orange-500">-{totalUso}d</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Saldo atual</p>
+                        <p className={`font-bold text-lg ${saldoFinal >= 0 ? 'text-green-600' : 'text-red-600'}`}>{saldoFinal}d</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Extrato */}
+                  {extrato.length === 0 ? (
+                    <div className="px-5 py-6 text-sm text-gray-400 text-center">Nenhum movimento registrado.</div>
+                  ) : (
+                    <div className="divide-y divide-gray-50">
+                      {extrato.map((e, i) => (
+                        <div key={i} className="px-5 py-3 flex items-center justify-between hover:bg-gray-50">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${e.tipo === 'credito' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-500'}`}>
+                              {e.tipo === 'credito' ? '+' : '-'}
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-800">{e.label}</p>
+                              <p className="text-xs text-gray-400">{fmtDate(e.data)}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-6 text-right">
+                            <span className={`text-sm font-semibold w-14 ${e.tipo === 'credito' ? 'text-blue-600' : 'text-orange-500'}`}>
+                              {e.tipo === 'credito' ? '+' : '-'}{e.valor}d
+                            </span>
+                            <span className={`text-sm font-bold w-14 ${e.saldo >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {e.saldo}d
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Linha de total */}
+                  {extrato.length > 0 && (
+                    <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
+                      <span className="text-xs text-gray-400 font-medium">Saldo até hoje · {new Date().toLocaleDateString('pt-BR')}</span>
+                      <span className={`text-base font-bold ${saldoFinal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {saldoFinal >= 0 ? '' : ''}{saldoFinal}d
+                      </span>
                     </div>
                   )}
                 </div>
