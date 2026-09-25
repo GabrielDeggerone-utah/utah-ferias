@@ -11,6 +11,47 @@ const DIAS_POR_ANO = 20
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 const CORES = ['bg-blue-500','bg-purple-500','bg-green-500','bg-orange-500','bg-pink-500','bg-teal-500','bg-indigo-500','bg-red-500']
 
+type Ciclo = {
+  label: string
+  creditado: number
+  usado: number
+  saldo: number
+  vencido: boolean      // concessivo acabou e ainda tem saldo
+  vencimento: string    // data limite para usar (credito + 1 ano)
+  credito: string
+}
+
+function calcCiclos(dataAdmissao: string, saldoAnterior: number, totalUsado: number, totalAgendado: number): Ciclo[] {
+  const { renovacoes } = calcDiasAcumulados(dataAdmissao)
+  const hoje = new Date()
+  const ciclos: Ciclo[] = []
+  let aAlocar = totalUsado + totalAgendado  // FIFO: desconta do ciclo mais antigo primeiro
+
+  if (saldoAnterior > 0) {
+    const usado = Math.min(saldoAnterior, aAlocar)
+    aAlocar -= usado
+    ciclos.push({ label: 'Saldo anterior', creditado: saldoAnterior, usado, saldo: saldoAnterior - usado, vencido: false, vencimento: '', credito: '2024-12-31' })
+  }
+
+  for (const r of renovacoes) {
+    const usado = Math.min(DIAS_POR_ANO, aAlocar)
+    aAlocar -= usado
+    const saldoCiclo = DIAS_POR_ANO - usado
+    const creditDate = new Date(r.credito + 'T12:00:00')
+    const venc = new Date(creditDate); venc.setFullYear(venc.getFullYear() + 1)
+    ciclos.push({
+      label: `${r.labelInicio} → ${r.labelFim}`,
+      creditado: DIAS_POR_ANO,
+      usado,
+      saldo: saldoCiclo,
+      vencido: venc < hoje && saldoCiclo > 0,
+      vencimento: venc.toISOString().split('T')[0],
+      credito: r.credito,
+    })
+  }
+  return ciclos
+}
+
 function calcDiasAcumulados(dataAdmissao: string) {
   const admissao = new Date(dataAdmissao + 'T12:00:00')
   const hoje = new Date()
@@ -207,27 +248,44 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                     </div>
                   </div>
                   {totalDireito > 0 ? (
-                    <div className="mb-3">
+                    <div className="mb-1">
                       <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>{pct}% comprometido</span>
                         <span>Próx. renovação: {fmtDate(proxRen.toISOString().split('T')[0])} (+{DIAS_POR_ANO}d)</span>
                       </div>
-                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex mb-3">
                         <div className="h-full bg-orange-500 transition-all" style={{ width: `${Math.round((usados / totalDireito) * 100)}%` }} />
                         {agendados > 0 && <div className="h-full bg-blue-400 transition-all" style={{ width: `${Math.round((agendados / totalDireito) * 100)}%` }} />}
                       </div>
-                      {agendados > 0 && <p className="text-xs text-blue-500 mt-1">■ azul = agendados (ainda não tirados) · ■ laranja = já usados</p>}
                     </div>
                   ) : (
                     <div className="mb-3 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">Primeira renovação em {fmtDate(proxRen.toISOString().split('T')[0])}</div>
                   )}
-                  {renovacoes.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {renovacoes.map(r => (
-                        <span key={r.credito} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">{r.labelInicio} → {r.labelFim} +{DIAS_POR_ANO}d</span>
-                      ))}
-                    </div>
-                  )}
+
+                  {/* Breakdown por ciclo */}
+                  {(() => {
+                    const ciclos = calcCiclos(f.data_admissao, f.saldo_anterior ?? 0, usados, agendados)
+                    return ciclos.length > 0 ? (
+                      <div className="mt-1 space-y-1.5">
+                        {ciclos.map((c, i) => (
+                          <div key={i} className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${c.vencido ? 'bg-red-50 border border-red-100' : c.saldo === 0 ? 'bg-gray-50' : 'bg-green-50 border border-green-100'}`}>
+                            <div className="flex items-center gap-2">
+                              <span className={`font-medium ${c.vencido ? 'text-red-700' : c.saldo === 0 ? 'text-gray-400' : 'text-green-700'}`}>{c.label}</span>
+                              {c.vencido && <span className="bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded text-xs">VENCIDO</span>}
+                              {!c.vencido && c.saldo > 0 && c.vencimento && <span className="text-gray-400">vence {fmtDate(c.vencimento)}</span>}
+                              {c.saldo === 0 && !c.vencido && <span className="text-gray-400">utilizado</span>}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-gray-400">{c.creditado}d</span>
+                              <span className="text-orange-500">−{c.usado}d</span>
+                              <span className={`font-bold w-8 text-right ${c.vencido ? 'text-red-600' : c.saldo === 0 ? 'text-gray-400' : 'text-green-600'}`}>{c.saldo}d</span>
+                            </div>
+                          </div>
+                        ))}
+                        {agendados > 0 && <p className="text-xs text-blue-500 pt-1">■ azul na barra = {agendados}d agendados (descontados do ciclo mais antigo com saldo)</p>}
+                      </div>
+                    ) : null
+                  })()}
                 </div>
               )
             })}
