@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase, createAdminSupabase } from '@/lib/supabase-server'
-
-async function verificarAuth() {
-  const supabase = createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  return user
-}
+import { createServerSupabase } from '@/lib/supabase-server'
 
 export async function POST(req: NextRequest) {
-  const user = await verificarAuth()
+  const supabase = createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { nome, data_admissao, cargo } = await req.json()
   if (!nome || !data_admissao) return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 })
 
-  const admin = createAdminSupabase()
-  const { data, error } = await admin
+  const { data, error } = await supabase
     .from('funcionarios')
     .insert({ nome, data_admissao, cargo: cargo || null })
     .select()
@@ -26,7 +20,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const user = await verificarAuth()
+  const supabase = createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { id, nome, data_admissao, cargo, ativo } = await req.json()
@@ -38,8 +33,7 @@ export async function PATCH(req: NextRequest) {
   if (cargo !== undefined) updates.cargo = cargo
   if (ativo !== undefined) updates.ativo = ativo
 
-  const admin = createAdminSupabase()
-  const { error } = await admin.from('funcionarios').update(updates).eq('id', id)
+  const { error } = await supabase.from('funcionarios').update(updates).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }
