@@ -13,22 +13,27 @@ type Props = {
 
 const DIAS_POR_ANO = 20
 
-// Calcula dias acumulados automaticamente:
-// +20 dias a cada ano a partir do 1º aniversário de admissão (mesmo mês)
-function calcDiasAcumulados(dataAdmissao: string): { total: number; renovacoes: { ano: number; mes: number; data: string }[] } {
+// Calcula dias acumulados automaticamente.
+// Ciclo aquisitivo: você TRABALHA o ano inteiro, depois GANHA os dias.
+// Ex: admitido Jul/2023 → ciclo Jul/2025→Jul/2026 credita em Jul/2026.
+// Contamos apenas ciclos cujo INÍCIO seja >= 2025.
+// (ciclo início 2026→fim 2027 ainda não terminou, não conta)
+function calcDiasAcumulados(dataAdmissao: string): { total: number; renovacoes: { cicloInicio: number; cicloFim: number; credito: string }[] } {
   const admissao = new Date(dataAdmissao + 'T12:00:00')
   const hoje = new Date()
-  const renovacoes: { ano: number; mes: number; data: string }[] = []
+  const renovacoes: { cicloInicio: number; cicloFim: number; credito: string }[] = []
 
+  // proxRenovacao = data de crédito (fim do ciclo aquisitivo)
   let proxRenovacao = new Date(admissao)
   proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
 
   while (proxRenovacao <= hoje) {
-    if (proxRenovacao.getFullYear() >= 2025) {
+    const cicloInicio = proxRenovacao.getFullYear() - 1 // ano em que o ciclo COMEÇOU
+    if (cicloInicio >= 2025) {
       renovacoes.push({
-        ano: proxRenovacao.getFullYear(),
-        mes: proxRenovacao.getMonth() + 1,
-        data: proxRenovacao.toISOString().split('T')[0],
+        cicloInicio,
+        cicloFim: proxRenovacao.getFullYear(),
+        credito: proxRenovacao.toISOString().split('T')[0],
       })
     }
     proxRenovacao = new Date(proxRenovacao)
@@ -238,12 +243,12 @@ export default function FeriasClient({ email, funcionarios: fInit, usos: uInit }
                     </div>
                   )}
 
-                  {/* Renovações passadas */}
+                  {/* Ciclos aquisitivos completados */}
                   {renovacoes.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {renovacoes.map(r => (
-                        <span key={r.data} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                          {MESES[r.mes - 1]}/{r.ano} +{DIAS_POR_ANO}d
+                        <span key={r.credito} className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                          {r.cicloInicio}→{r.cicloFim} +{DIAS_POR_ANO}d
                         </span>
                       ))}
                     </div>
