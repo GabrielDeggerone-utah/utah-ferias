@@ -24,11 +24,13 @@ function calcDiasAcumulados(dataAdmissao: string): { total: number; renovacoes: 
   proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
 
   while (proxRenovacao <= hoje) {
-    renovacoes.push({
-      ano: proxRenovacao.getFullYear(),
-      mes: proxRenovacao.getMonth() + 1,
-      data: proxRenovacao.toISOString().split('T')[0],
-    })
+    if (proxRenovacao.getFullYear() >= 2025) {
+      renovacoes.push({
+        ano: proxRenovacao.getFullYear(),
+        mes: proxRenovacao.getMonth() + 1,
+        data: proxRenovacao.toISOString().split('T')[0],
+      })
+    }
     proxRenovacao = new Date(proxRenovacao)
     proxRenovacao.setFullYear(proxRenovacao.getFullYear() + 1)
   }
